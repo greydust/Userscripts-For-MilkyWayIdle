@@ -4608,13 +4608,13 @@
                 needMatStr += `<div>${key} ${isZH ? "单价: " : "price per item: "}${numberFormatter(value)}<div>`;
             }
             appendHTMLStr = `<div style="color: ${SCRIPT_COLOR_TOOLTIP};"><div>${isZH
-                ? "强化模拟（默认100级强化，4级房子，10级工具，5级手套，究极茶，幸运茶，卖单价收货，无工时费）："
-                : "Enhancement simulator: Default level 100 enhancing, level 4 house, level 10 tool, level 5 gloves, ultra tea, blessed tea, sell order price in, no player time fee"
+                    ? "强化模拟（默认100级强化，4级房子，10级工具，5级手套，究极茶，幸运茶，卖单价收货，无工时费）："
+                    : `Enhancement simulator: level ${input_data.enhancing_level} enhancing, level ${input_data.laboratory_level} house, level 10 holy enhancer, level 5 gloves, ultra tea, blessed tea, sell order price in, 2M time fee`
                 }</div><div>${isZH ? "总成本 " : "Total cost "}${numberFormatter(best.totalCost.toFixed(0))}</div><div>${isZH ? "耗时 " : "Time spend "}${best.simResult.totalActionTimeStr
                 }</div>${best.protect_count > 0
                     ? `<div>${isZH ? "从 " : "Use protection from level "}` + best.protect_at + `${isZH ? " 级开始保护" : ""}</div>`
                     : `<div>${isZH ? "不需要保护" : "No protection use"}</div>`
-                }<div>${isZH ? "保护 " : "Protection "}${best.protect_count.toFixed(1)}${isZH ? " 次" : " times"}</div><div>${isZH ? "+0底子: " : "+0 Base item: "
+                }<div>${isZH ? "保护 " : "Protection "}${best.protect_count.toFixed(2)}${isZH ? " 次" : " times"}</div><div>${isZH ? "+0底子: " : "+0 Base item: "
                 }${numberFormatter(best.costs.baseCost)}</div><div>${best.protect_count > 0
                     ? (isZH ? "保护单价: " : "Price per protection: ") +
                     initData_itemDetailMap[best.costs.choiceOfProtection].name +
@@ -4639,7 +4639,7 @@
         for (let protect_at = 2; protect_at <= input_data.stop_at; protect_at++) {
             const simResult = Enhancelate(input_data, protect_at);
             const costs = getCosts(input_data.item_hrid, price_data);
-            const totalCost = costs.baseCost + costs.minProtectionCost * simResult.protect_count + costs.perActionCost * simResult.actions;
+            const totalCost = costs.baseCost + costs.minProtectionCost * simResult.protect_count + costs.perActionCost * simResult.actions + input_data.time_fee * simResult.totalActionTimeSec / 3600.0;
             const r = {};
             r.protect_at = protect_at;
             r.protect_count = simResult.protect_count;
@@ -4745,7 +4745,7 @@
         item_hrid: null,
         stop_at: null,
 
-        enhancing_level: 100, // 人物 Enhancing 技能等级
+        enhancing_level: 103, // 人物 Enhancing 技能等级
         laboratory_level: 4, // 房子等级
         enhancer_bonus: 4.64, // 工具提高成功率，0级=3.6，5级=4.03，10级=4.64
         glove_bonus: 11.2, // 手套提高强化速度，0级=10，5级=11.2，10级=12.9
@@ -4756,6 +4756,8 @@
         tea_blessed: true, // 祝福茶
 
         priceAskBidRatio: 1, // 取市场卖单价买单价比例，1=只用卖单价，0=只用买单价
+
+        time_fee: 2000000, // 2M time fee
     };
 
     function getCosts(hrid, price_data) {
