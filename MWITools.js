@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWITools
 // @namespace    http://tampermonkey.net/
-// @version      25.4
+// @version      25.5
 // @description  Tools for MilkyWayIdle. Shows total action time. Shows market prices. Shows action number quick inputs. Shows how many actions are needed to reach certain skill level. Shows skill exp percentages. Shows total networth. Shows combat summary. Shows combat maps index. Shows item level on item icons. Shows how many ability books are needed to reach certain level. Shows market equipment filters.
 // @author       bot7420, shykai
 // @license      CC-BY-NC-SA-4.0
@@ -5964,7 +5964,7 @@
     }
 
     async function importDataForAmvoidguy(button) {
-        const [exportObj, playerIDs, importedPlayerPositions, zone, isZoneDungeon, isParty] = constructGroupExportObj();
+        const [exportObj, playerIDs, importedPlayerPositions, zone, difficultyTier, isZoneDungeon, isParty] = constructGroupExportObj();
         console.log(exportObj);
         console.log(playerIDs);
 
@@ -5985,7 +5985,7 @@
                 document.querySelector(`input#simDungeonToggle`).checked = true;
                 document.querySelector(`input#simDungeonToggle`).dispatchEvent(new Event("change"));
                 const selectDungeon = document.querySelector(`select#selectDungeon`);
-                for (let i = 0; i < selectZone.options.length; i++) {
+                for (let i = 0; i < selectDungeon.options.length; i++) {
                     if (selectDungeon.options[i].value === zone) {
                         selectDungeon.options[i].selected = true;
                         break;
@@ -5998,6 +5998,16 @@
                 for (let i = 0; i < selectZone.options.length; i++) {
                     if (selectZone.options[i].value === zone) {
                         selectZone.options[i].selected = true;
+                        break;
+                    }
+                }
+            }
+
+            if (difficultyTier) {
+                const selectDifficulty = document.querySelector(`select#selectDifficulty`);
+                for (let i = 0; i < selectDifficulty.options.length; i++) {
+                    if  (Number(selectDifficulty.options[i].value) === difficultyTier) {
+                        selectDifficulty.options[i].selected = true;
                         break;
                     }
                 }
@@ -6055,6 +6065,7 @@
         const importedPlayerPositions = [false, false, false, false, false];
         let zone = "/actions/combat/fly";
         let isZoneDungeon = false;
+        let difficultyTier = 0;
 
         if (!characterObj?.partyInfo?.partySlotMap) {
             exportObj[1] = JSON.stringify(constructSelfPlayerExportObjFromInitCharacterData(characterObj, clientObj));
@@ -6064,6 +6075,7 @@
             for (const action of characterObj.characterActions) {
                 if (action && action.actionHrid.includes("/actions/combat/")) {
                     zone = action.actionHrid;
+                    difficultyTier = action.difficultyTier;
                     isZoneDungeon = clientObj.actionDetailMap[action.actionHrid]?.combatZoneInfo?.isDungeon;
                     break;
                 }
@@ -6103,10 +6115,11 @@
 
             // Zone
             zone = characterObj.partyInfo?.party?.actionHrid;
+            difficultyTier = characterObj.partyInfo?.party?.actionHrid?.difficultyTier;
             isZoneDungeon = clientObj.actionDetailMap[zone]?.combatZoneInfo?.isDungeon;
         }
 
-        return [exportObj, playerIDs, importedPlayerPositions, zone, isZoneDungeon, isParty];
+        return [exportObj, playerIDs, importedPlayerPositions, zone, difficultyTier, isZoneDungeon, isParty];
     }
 
     function constructSelfPlayerExportObjFromInitCharacterData(characterObj, clientObj) {
