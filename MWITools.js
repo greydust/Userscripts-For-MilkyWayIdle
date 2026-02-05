@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MWITools
 // @namespace    http://tampermonkey.net/
-// @version      25.3
+// @version      25.4
 // @description  Tools for MilkyWayIdle. Shows total action time. Shows market prices. Shows action number quick inputs. Shows how many actions are needed to reach certain skill level. Shows skill exp percentages. Shows total networth. Shows combat summary. Shows combat maps index. Shows item level on item icons. Shows how many ability books are needed to reach certain level. Shows market equipment filters.
 // @author       bot7420, shykai
 // @license      CC-BY-NC-SA-4.0
@@ -6663,8 +6663,8 @@
             }
         }
         const combatLevel =
-            0.2 * (resultLevels.stamina + resultLevels.intelligence + resultLevels.defense) +
-            0.4 * Math.max(0.5 * (resultLevels.attack + resultLevels.melee), resultLevels.ranged, resultLevels.magic);
+            0.1 * (resultLevels.stamina + resultLevels.intelligence + resultLevels.defense + resultLevels.attack + Math.max(resultLevels.melee, resultLevels.ranged, resultLevels.magic)) +
+            0.5 * Math.max(resultLevels.attack, resultLevels.defense, resultLevels.melee, resultLevels.ranged, resultLevels.magic);
         html += `<div>${isZHIn3rdPartyWebsites ? "战斗等级：" : "Combat level: "} ${combatLevel.toFixed(1)}</div>`;
         listDiv.innerHTML = html;
     }
