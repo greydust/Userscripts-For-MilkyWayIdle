@@ -35,15 +35,8 @@ function observeRelevantDom(scope, selector, callback) {
   return scheduler;
 }
 
-function refreshInventoryIfNeeded(className, outputSelector) {
-  const needsRender = [
-    ...document.querySelectorAll('div[class*="Inventory_items"]'),
-  ].some(
-    (node) =>
-      !node.classList.contains(className) ||
-      (outputSelector && !node.parentElement?.querySelector(outputSelector)),
-  );
-  if (needsRender) runtime.api.scheduleNetworthRefresh?.();
+function refreshInventoryIfNeeded() {
+  runtime.api.scheduleNetworthRefresh?.();
 }
 
 const adapters = {
@@ -168,9 +161,13 @@ adapters.fillMarketOrderPrice = {
       const target = document.querySelector(
         ".MarketplacePanel_marketListings__1GCyQ",
       );
-      if (!target || target === observed) return;
+      if (target === observed) return;
       listingObserver?.disconnect();
+      listingObserver = null;
       observed = target;
+      // A removed market list can retain the entire detached game panel.
+      // Release it even when no replacement list has mounted yet.
+      if (!target) return;
       const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
           for (const node of mutation.addedNodes) {

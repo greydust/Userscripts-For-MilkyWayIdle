@@ -1,3 +1,4 @@
+import { sharedStorage } from "./shared-storage.js";
 import { runtime } from "./runtime.js";
 
 function getGameLanguage() {
@@ -48,6 +49,13 @@ let SCRIPT_COLOR_TOOLTIP = "darkgreen";
 // 物品悬浮窗的字体颜色
 
 let settingsMap = {
+  inventoryLootDoubleClick: {
+    id: "inventoryLootDoubleClick",
+    desc: isZH
+      ? "右键打开当前战利品全部可开启数量"
+      : "Right-click to open all available loot",
+    isTrue: false,
+  },
   useOrangeAsMainColor: {
     id: "useOrangeAsMainColor",
     desc: isZH
@@ -431,6 +439,13 @@ let settingsMap = {
     desc: isZH ? "任务卡显示物品或怪物图标" : "Show item or monster task art.",
     isTrue: true,
   },
+  taskDungeonIcons: {
+    id: "taskDungeonIcons",
+    desc: isZH
+      ? "任务卡右上角显示地牢图标"
+      : "Show dungeon badges in the top-right of task cards.",
+    isTrue: true,
+  },
   taskStatistics: {
     id: "taskStatistics",
     desc: isZH
@@ -460,7 +475,9 @@ let settingsMap = {
   },
   guildMemberXp: {
     id: "guildMemberXp",
-    desc: isZH ? "成员表显示每小时经验" : "Show XP rates for guild members.",
+    desc: isZH
+      ? "成员表显示 24 小时经验速率"
+      : "Show the 24-hour XP rate for guild members.",
     isTrue: true,
   },
   guildLeaderboardXp: {
@@ -989,8 +1006,16 @@ const catalogRows = [
     "tasks",
     "任务背景图标",
     "Task artwork",
-    "用低透明度原生图标标识任务物品、怪物和副本。",
-    "Use subtle native item, monster, and dungeon artwork on task cards.",
+    "用低透明度原生图标标识任务物品或怪物。",
+    "Use subtle native item or monster artwork on task cards.",
+  ],
+  [
+    "taskDungeonIcons",
+    "tasks",
+    "地牢任务图标",
+    "Dungeon task badges",
+    "在任务卡右上角显示独立的地牢小图标；关闭后仍保留怪物主图。",
+    "Show separate dungeon badges in the task card's top-right; monster artwork remains visible when disabled.",
   ],
   [
     "taskStatistics",
@@ -1093,8 +1118,8 @@ const catalogRows = [
     "guild",
     "成员经验速率",
     "Member XP rates",
-    "在成员表增加近 6 小时、24 小时和本周平均 XP/h。",
-    "Add 6-hour, 24-hour, and this-week average XP/h columns to the member table.",
+    "在成员表增加可排序的 24 小时 XP/h 与相对速率条，可在设置中关闭。",
+    "Add a sortable 24-hour XP/h column with relative bars to the member table; it can be disabled in settings.",
   ],
   [
     "guildLeaderboardXp",
@@ -1162,6 +1187,15 @@ const catalogRows = [
   ],
 ];
 
+catalogRows.push([
+  "inventoryLootDoubleClick",
+  "inventory",
+  "战利品右键全部打开",
+  "Right-click all loot",
+  "右键库存中的战利品，按最新库存和钥匙数量全部打开；默认关闭。",
+  "Right-click inventory loot to open all available using current stock and keys; off by default.",
+]);
+
 const settingsCatalog = Object.fromEntries(
   catalogRows.map(([id, group, zhTitle, enTitle, zhSummary, enSummary]) => [
     id,
@@ -1175,6 +1209,27 @@ const settingsCatalog = Object.fromEntries(
   ]),
 );
 
+settingsCatalog.chatFontScale = {
+  id: "chatFontScale",
+  group: "general",
+  title: { zh: "聊天字号", en: "Chat font size" },
+  details: {
+    zh: "仅调整聊天区域，保存后立即生效。",
+    en: "Change only chat text; saved changes apply immediately.",
+  },
+  summary: {
+    zh: "同步调整聊天区域内的消息、人物名字、时间戳、频道和输入框字号。",
+    en: "Resize messages, player names, timestamps, channels and input within chat only.",
+  },
+  control: {
+    type: "select",
+    preference: "chatFontScale",
+    options: [80, 90, 100, 110, 120, 130, 140, 150, 160].map((value) => [
+      String(value),
+      { zh: `${value}%`, en: `${value}%` },
+    ]),
+  },
+};
 settingsCatalog.productionSummary.control = {
   type: "select",
   preference: "productionSummaryMode",
@@ -1241,6 +1296,7 @@ const settingParents = {
   taskQueueProgress: "taskInsights",
   taskAutoSort: "taskInsights",
   taskIcons: "taskInsights",
+  taskDungeonIcons: "taskIcons",
   taskStatistics: "taskInsights",
   taskClaimCollector: "taskInsights",
   taskMergeActions: "taskInsights",
@@ -1269,6 +1325,20 @@ const preferenceDefinitions = Object.freeze({
   productionSummaryMode: Object.freeze({
     defaultValue: "collapsed",
     values: Object.freeze(["collapsed", "expanded", "off"]),
+  }),
+  chatFontScale: Object.freeze({
+    defaultValue: "100",
+    values: Object.freeze([
+      "80",
+      "90",
+      "100",
+      "110",
+      "120",
+      "130",
+      "140",
+      "150",
+      "160",
+    ]),
   }),
   uiFontScale: Object.freeze({
     defaultValue: "standard",
@@ -1358,6 +1428,8 @@ function shouldSuppressMarketFeatures() {
 
 async function setSetting(id, value, options = {}) {
   if (!settingsMap[id]) return false;
+  if (id === "adaptIronCowMarketFeatures" && !options.automatic)
+    sharedStorage.setItem("MWITools_ironCowChoice", value ? "on" : "off");
   const normalized = Boolean(value);
   const previous = settingsMap[id].isTrue;
   settingsMap[id].isTrue = normalized;

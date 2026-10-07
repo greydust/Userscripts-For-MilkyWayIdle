@@ -91,6 +91,19 @@ test("procurement owns a standalone three-tab shell outside global settings", as
   });
   host.shadowRoot.querySelector('.tab[data-tab="settings"]').click();
   assert.ok(host.shadowRoot.querySelector(".setting-section"));
+  const safetySelect = host.shadowRoot.querySelector(
+    '[data-procurement-setting="safetyLevel"]',
+  );
+  runtime.api.renderProcurementShell();
+  assert.equal(
+    host.shadowRoot.querySelector('[data-procurement-setting="safetyLevel"]'),
+    safetySelect,
+  );
+  assert.match(safetySelect.querySelector("option").textContent, /Off/);
+  assert.match(
+    host.shadowRoot.querySelector("style").textContent,
+    /select option\{background:#f4f6fa;color:#172033\}/,
+  );
   assert.doesNotMatch(host.shadowRoot.textContent, /[\u3400-\u9fff]/);
   assert.match(host.shadowRoot.textContent, /Expand after adding/);
   host.shadowRoot.querySelector('.tab[data-tab="cart"]').click();
@@ -652,11 +665,11 @@ test("production refresh reads live inventory and recalculates cart projects", (
   assert.equal(runtime.state.initData_characterItems[0].count, 3);
   assert.equal(procurement.getInventoryCount("/items/nail"), 3);
   assert.deepEqual(procurement.getCartAllocationSummary("/items/nail"), {
-    total: 13,
+    total: 9,
     manual: 4,
     planning: 0,
-    project: 9,
-    projects: { [plan.id]: 9 },
+    project: 5,
+    projects: { [plan.id]: 5 },
   });
   const badge = document.querySelector(".mwi-procurement-badge");
   assert.equal(badge.dataset.state, "missing");
@@ -987,7 +1000,7 @@ test("house materials use DOM requirements and add only net shortages", async ()
 
   summary.querySelector("button").click();
   await Promise.resolve();
-  assert.equal(runtime.api.procurement.getCartItem("/items/board").quantity, 9);
+  assert.equal(runtime.api.procurement.getCartItem("/items/board").quantity, 7);
   assert.equal(
     runtime.api.procurement.getCartItem("/items/board").source,
     "housing",
@@ -1327,6 +1340,87 @@ test("market highlighting matches exact item sprite fragments", () => {
   runtime.api.procurement.clearCart({ includeStarred: true });
 });
 
+test("next item follows four rows through two cycles, enhancement levels and reorder", () => {
+  const procurement = runtime.api.procurement;
+  procurement.clearCart({ includeStarred: true });
+  const rows = [
+    ["/items/nail", 0],
+    ["/items/board", 0],
+    ["/items/nail", 5],
+    ["/items/astral_enhancer", 0],
+  ];
+  for (const [itemHrid, enhancementLevel] of rows)
+    procurement.addToCart({ itemHrid, enhancementLevel, quantity: 1 });
+  const host = {
+    state: { navTarget: "milking", showMarketplaceModal: false },
+    handleGoToMarketplace() {},
+    handleCloseMarketplaceModal() {
+      this.state.showMarketplaceModal = false;
+    },
+    setState(update, callback) {
+      Object.assign(this.state, update);
+      callback?.();
+    },
+  };
+  const root = document.createElement("div");
+  root.id = "root";
+  root._reactRootContainer = { current: { stateNode: host } };
+  document.body.append(root);
+  const modal = document.createElement("div");
+  modal.className = "MainPanel_marketplaceModal__rotation";
+  const panel = document.createElement("section");
+  panel.className = "MarketplacePanel_marketplacePanel__rotation";
+  panel.innerHTML =
+    '<div class="MarketplacePanel_currentItem__fixture"><svg><use href="/items_sprite.svg#nail"></use></svg></div>';
+  panel.getClientRects = () => [{}];
+  modal.append(panel);
+  document.body.append(modal);
+  runtime.api.openProcurementMarketplace(...rows[0]);
+  runtime.api.updateProcurementMarketUi();
+  // Reuse the same event handler while React still displays the old item.
+  const next = document.querySelector(".mwi-procurement-nav-next");
+  for (let i = 1; i <= 8; i++) {
+    next.click();
+    const target = host.state.marketViewOverrideData;
+    assert.deepEqual([target.itemHrid, target.enhancementLevel], rows[i % 4]);
+  }
+  runtime.api.openProcurementMarketplace(...rows[2]);
+  runtime.api.updateProcurementMarketUi();
+  procurement.confirmMarketPurchase(rows[2][0], 1, rows[2][1]);
+  runtime.api.updateProcurementMarketUi();
+  document.querySelector(".mwi-procurement-nav-next").click();
+  assert.equal(
+    host.state.marketViewOverrideData.itemHrid,
+    rows[3][0],
+    "fulfilled current row advances to its successor",
+  );
+  procurement.addToCart({
+    itemHrid: rows[2][0],
+    enhancementLevel: rows[2][1],
+    quantity: 1,
+  });
+  runtime.api.openProcurementMarketplace(...rows[0]);
+  procurement.setCartOrder(
+    [rows[0], rows[3], rows[2], rows[1]].map(([item, level]) =>
+      procurement.itemKey(item, level),
+    ),
+  );
+  runtime.api.updateProcurementMarketUi();
+  document.querySelector(".mwi-procurement-nav-next").click();
+  assert.equal(host.state.marketViewOverrideData.itemHrid, rows[3][0]);
+  for (const [item, level] of rows.slice(0, 3))
+    procurement.removeFromCart(item, level);
+  runtime.api.updateProcurementMarketUi();
+  assert.equal(
+    document.querySelector(".mwi-procurement-nav-next").disabled,
+    true,
+  );
+  procurement.clearCart({ includeStarred: true });
+  modal.remove();
+  root.remove();
+  runtime.api.updateProcurementMarketUi();
+});
+
 test("market-session deletion works from both the drawer and product navigation", () => {
   const procurement = runtime.api.procurement;
   procurement.clearCart({ includeStarred: true });
@@ -1452,6 +1546,10 @@ test("upgrade-chain shopping defaults to the direct predecessor and can use sele
   const panel = document.createElement("div");
   panel.className = "SkillActionDetail_regularComponent__chain-fixture";
   panel.innerHTML = `
+    <div class="SkillActionDetail_upgradeItemContainer__fixture">
+      <div class="Item_itemContainer__fixture"><svg><use href="#empty"></use></svg></div>
+      <span class="SkillActionDetail_noUpgradeItem__fixture">No upgrade item selected</span>
+    </div>
     <div class="SkillActionDetail_maxActionCountInput__fixture"><input value="2"></div>
     <div class="SkillActionDetail_actionContainer__fixture"></div>
     <section id="mwi-production-summary"></section>`;
@@ -1460,6 +1558,7 @@ test("upgrade-chain shopping defaults to the direct predecessor and can use sele
   const previousCreatePlans =
     runtime.api.procurement.getSettings().createPlansByDefault;
   const previousCreatePlan = runtime.api.procurement.createPlan;
+  const previousItems = runtime.state.initData_characterItems;
   const plannedMaterials = [];
   const previousPlanIds = new Set(
     runtime.api.procurement.getPlans().map((plan) => plan.id),
@@ -1497,6 +1596,15 @@ test("upgrade-chain shopping defaults to the direct predecessor and can use sele
     },
   });
   runtime.api.resolveProductionAction = () => "/actions/tailoring/shadow_pants";
+  runtime.state.initData_characterItems = [
+    {
+      itemHrid: "/items/beast_pants",
+      itemLocationHrid: "/item_locations/inventory",
+      enhancementLevel: 0,
+      count: 1,
+    },
+  ];
+  runtime.api.procurement.loadCharacterData("ui-character");
   panel.querySelector('input[type="text"],input').value = "2";
 
   runtime.api.renderProductionProcurement();
@@ -1515,6 +1623,26 @@ test("upgrade-chain shopping defaults to the direct predecessor and can use sele
     1,
   );
   assert.doesNotMatch(root.textContent, /Start from previous/);
+  let upgradeBadge = panel.querySelector(".mwi-procurement-upgrade-badge");
+  const emptyUpgradeState = panel.querySelector(
+    ".SkillActionDetail_noUpgradeItem__fixture",
+  );
+  assert.equal(emptyUpgradeState.nextElementSibling, upgradeBadge);
+  assert.equal(upgradeBadge.dataset.state, "missing");
+  assert.match(upgradeBadge.textContent, /Need 3/);
+  assert.equal(root.querySelector(".mwi-procurement-upgrade-item-state"), null);
+  runtime.state.initData_characterItems[0].count = 5;
+  runtime.api.procurement.loadCharacterData("ui-character");
+  runtime.api.renderProductionProcurement();
+  root = document.querySelector("#mwitools-procurement-production");
+  upgradeBadge = panel.querySelector(".mwi-procurement-upgrade-badge");
+  assert.equal(emptyUpgradeState.nextElementSibling, upgradeBadge);
+  assert.equal(upgradeBadge.dataset.state, "ready");
+  assert.match(upgradeBadge.textContent, /Spare 1/);
+  runtime.state.initData_characterItems[0].count = 1;
+  runtime.api.procurement.loadCharacterData("ui-character");
+  runtime.api.renderProductionProcurement();
+  root = document.querySelector("#mwitools-procurement-production");
   assert.deepEqual(checkedState(), [true, true]);
   root.querySelector(".mwi-procurement-inline-button").click();
 
@@ -1534,6 +1662,8 @@ test("upgrade-chain shopping defaults to the direct predecessor and can use sele
     .filter((plan) => !previousPlanIds.has(plan.id))
     .forEach((plan) => runtime.api.procurement.removePlan(plan.id));
   runtime.api.procurement.clearCart({ includeStarred: true });
+  runtime.state.initData_characterItems = previousItems;
+  runtime.api.procurement.loadCharacterData("ui-character");
   runtime.api.renderProductionProcurement();
   root = document.querySelector("#mwitools-procurement-production");
   chainMode = root.querySelector(".mwi-procurement-chain-mode input");

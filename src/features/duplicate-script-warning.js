@@ -1,3 +1,4 @@
+import { sharedStorage } from "../core/shared-storage.js";
 import { runtime } from "../core/runtime.js";
 
 const WARNING_ID = "mwitools-duplicate-script-warning";
@@ -56,7 +57,7 @@ function duplicateScriptId(name) {
   );
 }
 
-function readMutedDuplicateScriptIds(storage = globalThis.localStorage) {
+function readMutedDuplicateScriptIds(storage = sharedStorage) {
   try {
     const value = JSON.parse(storage?.getItem(MUTED_DUPLICATES_KEY) || "[]");
     return new Set(Array.isArray(value) ? value.map(String) : []);
@@ -65,13 +66,13 @@ function readMutedDuplicateScriptIds(storage = globalThis.localStorage) {
   }
 }
 
-function writeMutedDuplicateScriptIds(ids, storage = globalThis.localStorage) {
+function writeMutedDuplicateScriptIds(ids, storage = sharedStorage) {
   const value = [...new Set(ids ?? [])].map(String).filter(Boolean).sort();
   storage?.setItem(MUTED_DUPLICATES_KEY, JSON.stringify(value));
   return value;
 }
 
-function clearMutedDuplicateScriptIds(storage = globalThis.localStorage) {
+function clearMutedDuplicateScriptIds(storage = sharedStorage) {
   storage?.removeItem(MUTED_DUPLICATES_KEY);
   activeDuplicateWarningMonitor?.schedule();
 }
@@ -141,7 +142,16 @@ function createDuplicateWarningMonitor(options = {}) {
   const documentRef = options.documentRef ?? globalThis.document;
   const detect = options.detect ?? (() => detectDuplicateScripts(options));
   const render = options.render ?? showDuplicateWarning;
-  const scheduleTask = options.scheduleTask ?? globalThis.queueMicrotask;
+  let pendingTimer = null;
+  const clearTimeoutRef = options.clearTimeoutRef ?? globalThis.clearTimeout;
+  const scheduleTask =
+    options.scheduleTask ??
+    ((callback) => {
+      pendingTimer = (options.setTimeoutRef ?? globalThis.setTimeout)(() => {
+        pendingTimer = null;
+        callback();
+      }, 1_000);
+    });
   const setIntervalRef = options.setIntervalRef ?? globalThis.setInterval;
   const clearIntervalRef = options.clearIntervalRef ?? globalThis.clearInterval;
   const Observer = options.MutationObserverRef ?? globalThis.MutationObserver;
@@ -241,6 +251,8 @@ function createDuplicateWarningMonitor(options = {}) {
       if (destroyed) return;
       destroyed = true;
       pending = false;
+      if (pendingTimer !== null) clearTimeoutRef(pendingTimer);
+      pendingTimer = null;
       observer?.disconnect();
       if (intervalId !== undefined) clearIntervalRef?.(intervalId);
       documentRef?.getElementById(WARNING_ID)?.remove();

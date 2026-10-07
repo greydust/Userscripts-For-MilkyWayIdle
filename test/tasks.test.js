@@ -89,7 +89,7 @@ registerGameLocaleResources("zh", {
 
 runtime.api.getOriTextFromElement = (element) => element?.textContent ?? "";
 runtime.settings.settingsMap.taskIcons.isTrue = false;
-runtime.settings.settingsMap.taskAutoSort.isTrue = false;
+runtime.settings.settingsMap.taskAutoSort.isTrue = true;
 runtime.state.currentCharacterId = "tasks-test";
 runtime.state.initData_actionCategoryDetailMap = {
   "/action_categories/combat/smelly_planet": {
@@ -279,12 +279,13 @@ test("tasks use a flat sorted list with statistics filters", () => {
   );
   assert.match(
     styles,
-    /\.mwi-task-bg\s*\{[^}]*top:6%[^}]*right:8%[^}]*left:0[^}]*display:flex[^}]*height:88%[^}]*flex-direction:row-reverse/,
+    /\.mwi-task-bg\s*\{[^}]*inset:6% 8% 6% 0[^}]*display:flex[^}]*justify-content:flex-end/,
   );
   assert.match(
     styles,
-    /\.mwi-task-bg svg\s*\{[^}]*width:24%[^}]*height:100%[^}]*flex:0 0 24%/,
+    /\.mwi-task-bg svg\s*\{[^}]*width:32%[^}]*height:100%[^}]*flex:0 0 32%/,
   );
+  assert.match(styles, /\.mwi-task-dungeon-badges[^}]*top:5px[^}]*right:6px/);
   assert.match(
     styles,
     /\.mwi-task-merge-toast[^}]*position:fixed[^}]*z-index:2147483200/,
@@ -670,6 +671,40 @@ test("a reset refreshes metadata without changing the current card order", () =>
   );
 });
 
+test("an abandon confirmation keeps the current visual task order", () => {
+  document.querySelector('[class*="TasksPanel_taskList"]')?.remove();
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div class="TasksPanel_taskList__abandon-confirmation">
+      ${card("制作 - 木板", "0 / 5")}
+      ${card("挤奶 - 奶牛", "0 / 20")}
+    </div>`,
+  );
+  runtime.settings.settingsMap.taskNewBadge.isTrue = false;
+  runtime.state.characterQuests = [
+    { id: "abandon-crafting", actionHrid: "/actions/crafting/lumber" },
+    { id: "abandon-milking", actionHrid: "/actions/milking/cow" },
+  ];
+  assert.equal(runtime.api.renderTasks({ allowReusedPositional: false }), true);
+
+  const list = document.querySelector(
+    ".TasksPanel_taskList__abandon-confirmation",
+  );
+  const cards = [...list.querySelectorAll(TASK_SELECTOR)];
+  const originalOrders = cards.map((taskCard) => taskCard.style.order);
+  assert.deepEqual(originalOrders, ["2", "1"]);
+
+  cards[1].innerHTML = "<button>返回</button><button>确认放弃</button>";
+  cards.forEach((taskCard) => {
+    taskCard.style.order = "";
+  });
+  assert.equal(runtime.api.renderTasks({ allowReusedPositional: false }), true);
+  assert.deepEqual(
+    cards.map((taskCard) => taskCard.style.order),
+    originalOrders,
+  );
+});
+
 test("task mutation filtering ignores MWITools decorations but keeps native progress", () => {
   const list = document.createElement("div");
   list.className = "TasksPanel_taskList__mutation-filter";
@@ -778,6 +813,11 @@ test("opening the native reset payment choice pauses task regrouping", () => {
   );
   runtime.api.renderTasks();
   options.querySelector("button").click();
+  assert.equal(
+    shouldRenderTaskMutations(records),
+    true,
+    "confirming a payment choice must release the native render guard before the options close",
+  );
   options.remove();
   assert.equal(
     shouldRenderTaskMutations([
@@ -910,7 +950,17 @@ test("an open reroll pauses artwork only until a payment choice is confirmed", (
   );
 
   options.querySelector("button").click();
-  assert.equal(runtime.api.renderTasks(), true);
+  const titleNode = taskCard.querySelector(
+    '[class*="RandomTask_name"]',
+  ).firstChild;
+  const titleMutation = {
+    type: "characterData",
+    target: titleNode,
+    addedNodes: [],
+    removedNodes: [],
+  };
+  assert.equal(shouldRenderTaskMutations([titleMutation]), true);
+  assert.equal(runtime.api.renderTasks({ allowReusedPositional: false }), true);
   assert.equal(options.isConnected, true);
   assert.equal(taskCard.querySelector(".mwi-task-bg"), background);
   assert.match(
@@ -1319,29 +1369,43 @@ test("dungeon counts overlap and filters keep native combat cards", () => {
     ).length,
     3,
   );
+  const decoratedTask = document.querySelector(TASK_SELECTOR);
+  assert.deepEqual(
+    [...decoratedTask.querySelectorAll(":scope > .mwi-task-bg use")].map(
+      (use) => use.getAttribute("href"),
+    ),
+    ["/static/media/combat_monsters_sprite.test.svg#fly"],
+  );
   assert.deepEqual(
     [
-      ...document
-        .querySelector(TASK_SELECTOR)
-        .querySelectorAll(":scope > .mwi-task-bg use"),
+      ...decoratedTask.querySelectorAll(
+        ":scope > .mwi-task-dungeon-badges use",
+      ),
     ].map((use) => use.getAttribute("href")),
     [
-      "/static/media/combat_monsters_sprite.test.svg#fly",
       "/static/media/actions_sprite.test.svg#chimerical_den",
       "/static/media/actions_sprite.test.svg#sinister_circus",
       "/static/media/actions_sprite.test.svg#pirate_cove",
     ],
   );
+  runtime.settings.settingsMap.taskDungeonIcons.isTrue = false;
+  runtime.api.renderTasks();
+  assert.ok(decoratedTask.querySelector(":scope > .mwi-task-bg"));
+  assert.equal(
+    decoratedTask.querySelector(":scope > .mwi-task-dungeon-badges"),
+    null,
+  );
+  runtime.settings.settingsMap.taskDungeonIcons.isTrue = true;
+  runtime.api.renderTasks();
   const firstTaskCard = document.querySelector(TASK_SELECTOR);
   assert.equal(firstTaskCard.dataset.mwitoolsMapIndex, "1");
   assert.equal(
     firstTaskCard.dataset.mwitoolsTaskIconSignature,
-    [
-      "/static/media/combat_monsters_sprite.test.svg#fly",
+    `/static/media/combat_monsters_sprite.test.svg#fly\u001f${[
       "/static/media/actions_sprite.test.svg#chimerical_den",
       "/static/media/actions_sprite.test.svg#sinister_circus",
       "/static/media/actions_sprite.test.svg#pirate_cove",
-    ].join("\n"),
+    ].join("\n")}`,
   );
 
   toolbar
@@ -1612,7 +1676,7 @@ test("combat monster grouping stays stable through reset and refreshes on re-ent
   runtime.settings.settingsMap.taskNewBadge.isTrue = true;
 });
 
-test("production-chain tasks stay together when automatic sorting is disabled", () => {
+test("disabled automatic sorting restores original native order", () => {
   document.querySelector('[class*="TasksPanel_taskList"]')?.remove();
   document.body.insertAdjacentHTML(
     "beforeend",
@@ -1699,8 +1763,8 @@ test("production-chain tasks stay together when automatic sorting is disabled", 
     );
   assert.deepEqual(orderedTitles, [
     "奶酪锻造 - 绛红刷子",
-    "奶酪锻造 - 彩虹刷子",
     "奶酪锻造 - 无关工具",
+    "奶酪锻造 - 彩虹刷子",
   ]);
 });
 
@@ -1787,7 +1851,7 @@ test("shuffled quest data still keeps the brush chain together", () => {
     },
   };
   runtime.state.characterQuests = quests;
-  runtime.settings.settingsMap.taskAutoSort.isTrue = false;
+  runtime.settings.settingsMap.taskAutoSort.isTrue = true;
 
   runtime.api.renderTasks();
 

@@ -503,8 +503,15 @@ test("inventory asset summaries rerender without restoring the removed header UI
 test("inventory values stay frozen until an explicit forced refresh", async () => {
   const originalCharacterId = runtime.state.currentCharacterId;
   const originalRefresh = runtime.api.refreshAssetSnapshot;
+  const originalHistory = runtime.api.assetHistory;
   let refreshCount = 0;
   runtime.state.currentCharacterId = "frozen-inventory-session";
+  runtime.api.assetHistory = {
+    getComparison: () => ({
+      gapDays: 1,
+      record: { values: { total: 1 } },
+    }),
+  };
   runtime.api.refreshAssetSnapshot = async () => {
     refreshCount += 1;
     return originalRefresh();
@@ -535,6 +542,30 @@ test("inventory values stay frozen until an explicit forced refresh", async () =
     document.querySelectorAll("#script_refresh_inventory_btn").length,
     1,
   );
+  const shareButton = document.querySelector("#script_share_inventory_btn");
+  assert.equal(
+    document.querySelector("#script_refresh_inventory_btn").nextElementSibling,
+    shareButton,
+  );
+  assert.equal(shareButton.disabled, false);
+  const chatInput = document.createElement("input");
+  chatInput.className = "Chat_chatInput__test";
+  document.body.append(chatInput);
+  shareButton.click();
+  assert.ok(chatInput.value.length > 0);
+  assert.match(shareButton.textContent, /已放入聊天框/);
+
+  const originalSetTimeout = globalThis.setTimeout;
+  let scheduled = 0;
+  globalThis.setTimeout = () => {
+    scheduled += 1;
+    return scheduled;
+  };
+  for (let index = 0; index < 100; index += 1) {
+    runtime.api.scheduleNetworthRefresh();
+  }
+  globalThis.setTimeout = originalSetTimeout;
+  assert.equal(scheduled, 0, "mounted frozen inventory must not queue timers");
 
   document.querySelector("#toggleNetWorth").click();
   const refreshButton = document.querySelector("#script_refresh_inventory_btn");
@@ -553,7 +584,9 @@ test("inventory values stay frozen until an explicit forced refresh", async () =
   runtime.state.marketItemValues["/items/milk"][0] = 1_000;
   runtime.api.invalidateAssetValueCache();
   runtime.api.refreshAssetSnapshot = originalRefresh;
+  runtime.api.assetHistory = originalHistory;
   runtime.state.currentCharacterId = originalCharacterId;
+  chatInput.remove();
 });
 
 test("inventory summary returns when the game reuses a processed inventory node", async () => {
@@ -608,7 +641,7 @@ test("listing values use explicit balances and never infer buy reserves", () => 
     },
   ]);
 
-  assert.deepEqual(totals, { fair: 15_890, ask: 16_960, bid: 14_820 });
+  assert.deepEqual(totals, { fair: 15_950, ask: 17_026, bid: 14_874 });
 });
 
 test("task tokens join inventory assets only when their switch is enabled", async () => {
@@ -996,4 +1029,131 @@ test("all nine game languages leave inventory summary visibility to the native p
     assert.notEqual(summary.style.display, "none", locale);
   }
   localStorage.setItem("i18nextLng", "zh-CN");
+});
+
+test("native favorite and lock ranges apply only to matching enhancement levels", async () => {
+  const { hasInventoryMark } = await import("../src/features/inventory.js");
+  runtime.state.characterItemMarks = [
+    {
+      itemHrid: "/items/gear",
+      kind: "favorite",
+      minEnhancementLevel: 5,
+      maxEnhancementLevel: 5,
+    },
+    {
+      itemHrid: "/items/gear",
+      kind: "lock",
+      minEnhancementLevel: 0,
+      maxEnhancementLevel: 1000,
+    },
+  ];
+  assert.equal(hasInventoryMark("/items/gear", 5, "favorite"), true);
+  assert.equal(hasInventoryMark("/items/gear", 4, "favorite"), false);
+  assert.equal(hasInventoryMark("/items/gear", 12, "lock"), true);
+  assert.equal(hasInventoryMark("/items/other", 12, "lock"), false);
+  runtime.state.characterItemMarks = [];
+});
+
+test("category tabs and favorites honor asset inclusion settings with and without a frozen snapshot", async () => {
+  const stateKeys = [
+    "currentCharacterId",
+    "initData_characterItems",
+    "initData_itemDetailMap",
+    "itemEnNameToHridMap",
+  ];
+  const savedState = Object.fromEntries(
+    stateKeys.map((key) => [key, runtime.state[key]]),
+  );
+  const settingIds = [
+    "includeCowbellsInAssets",
+    "includeTaskTokensInAssets",
+    "includeGuildDungeonTokensInAssets",
+  ];
+  const savedSettings = settingIds.map((id) => runtime.settings.get(id));
+  const originalAsset = runtime.api.getAssetValue;
+  const originalRefresh = runtime.api.refreshAssetSnapshot;
+  const originalHtml = document.body.innerHTML;
+  document.body.innerHTML = '<section id="inventory-parent"></section>';
+  const parent = document.querySelector("#inventory-parent");
+  const names = [
+    "Coin",
+    "Cowbell",
+    "Task Token",
+    "Guild Token",
+    "Pirate Token",
+  ];
+  const hrids = [
+    "coin",
+    "cowbell",
+    "task_token",
+    "guild_token",
+    "pirate_token",
+  ].map((id) => `/items/${id}`);
+  const render = (visibleNames) => {
+    parent.innerHTML = `<div class="Inventory_items__test"><div><div class="Inventory_itemGrid__test">
+      <button class="Inventory_categoryButton__test">货币</button>
+      ${visibleNames.map((name) => `<div class="Item_itemContainer__test"><svg aria-label="${name}"></svg></div>`).join("")}
+    </div></div></div>`;
+    return parent.querySelector('[class*="Inventory_items"]');
+  };
+  const assertTotal = (total) =>
+    assert.equal(
+      parent.querySelector(".mwi-inventory-category-value").title,
+      `分类价值: ${total}`,
+    );
+  try {
+    runtime.state.initData_characterItems = hrids.map((itemHrid, index) => ({
+      itemHrid,
+      count: index + 1,
+      enhancementLevel: 0,
+      itemLocationHrid: "/item_locations/inventory",
+    }));
+    runtime.state.initData_itemDetailMap = Object.fromEntries(
+      hrids.map((id) => [id, { categoryHrid: "/item_categories/currency" }]),
+    );
+    runtime.state.itemEnNameToHridMap = Object.fromEntries(
+      names.map((name, index) => [name, hrids[index]]),
+    );
+    runtime.api.getAssetValue = () => 10;
+    let refreshCount = 0;
+    runtime.api.refreshAssetSnapshot = async () => {
+      refreshCount++;
+      return originalRefresh();
+    };
+    for (let mask = 0; mask < 8; mask++) {
+      runtime.state.currentCharacterId = `category-inclusion-${mask}`;
+      for (const [index, id] of settingIds.entries()) {
+        await runtime.settings.set(id, Boolean(mask & (1 << index)), {
+          persist: false,
+        });
+      }
+      const expected =
+        10 + (mask & 1 ? 20 : 0) + (mask & 2 ? 30 : 0) + (mask & 4 ? 90 : 0);
+      // The initial visible grid can render before the snapshot is available.
+      runtime.api.addInventoryCategoryValues(render(names));
+      assertTotal(expected);
+      render([]); // All tab with a collapsed currency category.
+      await runtime.api.calculateNetworth();
+      assertTotal(expected);
+      render(names); // Single category tab rebuilds the grid.
+      await runtime.api.calculateNetworth();
+      assertTotal(expected);
+      render(["Cowbell", "Guild Token"]); // Favorites/search show only matching stacks.
+      await runtime.api.calculateNetworth();
+      assertTotal((mask & 1 ? 20 : 0) + (mask & 4 ? 40 : 0));
+      assert.equal(
+        refreshCount,
+        mask + 1,
+        "tab switches must reuse the asset snapshot",
+      );
+    }
+  } finally {
+    Object.assign(runtime.state, savedState);
+    runtime.api.getAssetValue = originalAsset;
+    runtime.api.refreshAssetSnapshot = originalRefresh;
+    document.body.innerHTML = originalHtml;
+    for (const [index, id] of settingIds.entries()) {
+      await runtime.settings.set(id, savedSettings[index], { persist: false });
+    }
+  }
 });

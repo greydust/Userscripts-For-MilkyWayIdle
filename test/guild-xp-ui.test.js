@@ -225,7 +225,7 @@ test("weekly guild experience is normalized to this-week XP per hour", () => {
 test("guild XP columns draw relative bars and sort in both directions", async () => {
   document.body.innerHTML = `
     <div class="GuildPanel_guildPanel__test">
-      <div class="GuildPanel_membersTab__test">
+      <div class="GuildPanel_membersTab-test">
         <table>
           <thead><tr><th>成员</th></tr></thead>
           <tbody><tr><td>Alice</td></tr><tr><td>Bob</td></tr><tr><td>Charlie</td></tr></tbody>
@@ -276,23 +276,41 @@ test("guild XP columns draw relative bars and sort in both directions", async ()
   await runtime.api.sampleGuildState(false);
   runtime.api.renderGuildTables();
 
-  const table = document.querySelector(".GuildPanel_membersTab__test table");
+  const table = document.querySelector(".GuildPanel_membersTab-test table");
   assert.ok(
     document
-      .querySelector(".GuildPanel_membersTab__test")
+      .querySelector(".GuildPanel_membersTab-test")
       .classList.contains("mwi-guild-members-wide"),
   );
   assert.ok(
     table.parentElement.classList.contains("mwi-guild-member-table-wrap"),
+  );
+  const guildStyles = document.getElementById("mwitools-guild-xp-style");
+  assert.ok(guildStyles, "guild XP styles should be mounted");
+  assert.match(
+    guildStyles.textContent,
+    /\.mwi-guild-members-wide\s*\{[^}]*box-sizing:border-box[^}]*width:min\(100%,960px\)[^}]*max-width:960px/s,
+  );
+  assert.match(
+    guildStyles.textContent,
+    /\.mwi-guild-member-table-wrap\s*\{[^}]*box-sizing:border-box[^}]*width:min\(100%,960px\)[^}]*overflow-x:hidden/s,
+  );
+  assert.match(
+    guildStyles.textContent,
+    /\.mwi-guild-member-table-wrap \.mwi-guild-member-table\s*\{[^}]*width:100%[^}]*min-width:0[^}]*table-layout:fixed/s,
+  );
+  assert.match(
+    guildStyles.textContent,
+    /\.mwi-guild-rate-content\s*\{[^}]*grid-template-columns:86px 72px/s,
   );
   assert.equal(table.rows[0].cells.length, table.rows[1].cells.length);
   assert.deepEqual(
     [...table.querySelectorAll("thead th")].map((cell) =>
       cell.textContent.replace("↕", ""),
     ),
-    ["成员", "近 6 小时 XP/h", "24 小时 XP/h", "本周平均 XP/h"],
+    ["成员", "24 小时 XP/h"],
   );
-  assert.equal(table.querySelectorAll(".mwi-guild-rate-cell").length, 9);
+  assert.equal(table.querySelectorAll(".mwi-guild-rate-cell").length, 3);
   assert.equal(
     document.querySelectorAll(
       "#application-table .mwi-guild-rate-cell,#application-table .mwi-guild-recent-head,#application-table .mwi-guild-day-head,#application-table .mwi-guild-week-head",
@@ -309,7 +327,7 @@ test("guild XP columns draw relative bars and sort in both directions", async ()
         (fill) => fill.style.width,
       ),
     ),
-    [["50%", "50%", "25%"], ["100%", "100%", "100%"], []],
+    [["50%"], ["100%"], []],
   );
 
   const trialHeader = document.createElement("th");
@@ -329,7 +347,7 @@ test("guild XP columns draw relative bars and sort in both directions", async ()
     [...table.querySelectorAll("thead th")].map((cell) =>
       cell.textContent.replace("↕", ""),
     ),
-    ["成员", "试炼层数", "近 6 小时 XP/h", "24 小时 XP/h", "本周平均 XP/h"],
+    ["成员", "试炼层数", "24 小时 XP/h"],
   );
   assert.ok(
     [...table.tBodies[0].rows].every(
@@ -339,15 +357,15 @@ test("guild XP columns draw relative bars and sort in both directions", async ()
     ),
   );
 
-  const recentHeader = table.querySelector(".mwi-guild-recent-head");
-  recentHeader.click();
+  const dayHeader = table.querySelector(".mwi-guild-day-head");
+  dayHeader.click();
   assert.deepEqual(
     [...table.querySelectorAll("tbody tr")].map(
       (row) => row.cells[0].textContent,
     ),
     ["Bob", "Alice", "Charlie"],
   );
-  recentHeader.click();
+  dayHeader.click();
   assert.deepEqual(
     [...table.querySelectorAll("tbody tr")].map(
       (row) => row.cells[0].textContent,
@@ -482,6 +500,71 @@ test("guild trend smooths a very short XP burst over at least one hour", () => {
 
   assert.equal(points.length, 2);
   assert.ok(points.at(-1).rate < 1_000);
+});
+
+test("linear guild trend preserves rolling-window results across gaps, duplicates and XP decreases", () => {
+  const hour = 3_600_000;
+  const now = 50 * 24 * hour;
+  let at = now - 10 * 24 * hour;
+  const input = Array.from({ length: 1500 }, (_, index) => {
+    at += index % 17 === 0 ? 8 * hour : (index % 4) * 60_000;
+    return { at, xp: index % 61 === 0 ? 0 : index * 100 };
+  }).filter((point) => point.at <= now);
+  const expected = [];
+  for (let i = 1; i < input.length; i++) {
+    const current = input[i];
+    if (current.at < now - 7 * 24 * hour) continue;
+    // Definition: first preceding sample within six hours, or the immediate
+    // predecessor across a gap; fall back to the latest sample >= 1 hour old.
+    const previous = input.slice(0, i);
+    let baseline =
+      previous.find((point) => current.at - point.at <= 6 * hour) ??
+      previous.at(-1);
+    if (current.at - baseline.at < hour)
+      baseline = previous.findLast((point) => current.at - point.at >= hour);
+    if (!baseline || current.xp < baseline.xp) continue;
+    expected.push({
+      at: current.at,
+      rate: ((current.xp - baseline.xp) / (current.at - baseline.at)) * hour,
+    });
+  }
+  assert.ok(expected.length > 100);
+  assert.deepEqual(runtime.api.getGuildXpRatePoints(input, now), expected);
+});
+
+test("member and leaderboard rates do not retain unused history curves", async () => {
+  const original = runtime.api.calculateXpRates;
+  const getHistory = runtime.api.getXpHistory;
+  const history = [
+    { at: 1, xp: 10 },
+    { at: 2, xp: 20 },
+  ];
+  const calculated = [];
+  runtime.api.getXpHistory = async () => history;
+  runtime.api.calculateXpRates = (points) => {
+    const rates = { day: 123, points, lastSampleAt: 2 };
+    calculated.push(rates);
+    return rates;
+  };
+  runtime.state.guild = { id: "memory", guildExperience: 20 };
+  runtime.state.guildCharacters = [{ id: "member", guildExperience: 20 }];
+  runtime.state.guildLeaderboard = [{ id: "ranking", guildExperience: 20 }];
+  try {
+    await runtime.api.sampleGuildState(true);
+    assert.equal(calculated.length, 3);
+    assert.equal(calculated[0].points, history);
+    assert.deepEqual(
+      calculated.slice(1).map((rates) => rates.points),
+      [[], []],
+    );
+    assert.ok(calculated.every((rates) => rates.day === 123));
+    assert.equal(history.length, 2, "stored/read history remains intact");
+  } finally {
+    runtime.api.calculateXpRates = original;
+    runtime.api.getXpHistory = getHistory;
+    runtime.state.guildCharacters = [];
+    runtime.state.guildLeaderboard = [];
+  }
 });
 
 test("guild trend renders axes, readable ticks, grid lines, and bounded data", async () => {
